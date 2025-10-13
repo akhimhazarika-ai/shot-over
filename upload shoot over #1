@@ -656,6 +656,66 @@
             background: rgba(255, 100, 0, 0.4);
         }
         
+        /* Zoom Controls for Mobile */
+        #zoom-controls {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            opacity: 0.7;
+            transition: opacity 0.3s ease;
+        }
+        
+        #zoom-controls:hover {
+            opacity: 1;
+        }
+        
+        .zoom-button {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: rgba(0,0,0,0.6);
+            border: 2px solid rgba(255,255,255,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+            cursor: pointer;
+            backdrop-filter: blur(5px);
+            transition: all 0.2s;
+            user-select: none;
+        }
+        
+        .zoom-button:active {
+            background: rgba(255,255,255,0.2);
+            transform: scale(0.95);
+        }
+        
+        /* Zoom indicator */
+        #zoom-indicator {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            font-size: 12px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+            z-index: 100;
+            background: rgba(0,0,0,0.8);
+            padding: 5px 10px;
+            border-radius: 8px;
+            border: 2px solid rgba(255, 255, 255, 0.8);
+            display: none;
+            backdrop-filter: blur(5px);
+        }
+        
         /* Hide instructions on very short screens */
         @media (max-height: 450px) {
             #instructions {
@@ -791,6 +851,37 @@
             
             #combo-indicator, #powerup-indicator {
                 font-size: 60px;
+            }
+            
+            /* Hide zoom controls on desktop by default */
+            #zoom-controls {
+                display: none;
+            }
+        }
+        
+        /* Show zoom controls on mobile */
+        @media (max-width: 768px) {
+            #zoom-controls {
+                display: flex;
+            }
+            
+            .zoom-button {
+                width: 45px;
+                height: 45px;
+                font-size: 20px;
+            }
+        }
+        
+        /* Very small screens */
+        @media (max-width: 480px) {
+            #zoom-controls {
+                right: 5px;
+            }
+            
+            .zoom-button {
+                width: 40px;
+                height: 40px;
+                font-size: 18px;
             }
         }
     </style>
@@ -941,6 +1032,15 @@
         <div class="shooting-button shotgun" id="shotgun-button">💥</div>
     </div>
     
+    <!-- Zoom Controls for Mobile -->
+    <div id="zoom-controls">
+        <div class="zoom-button" id="zoom-in">+</div>
+        <div class="zoom-button" id="zoom-out">-</div>
+    </div>
+    
+    <!-- Zoom Indicator -->
+    <div id="zoom-indicator">Zoom: 100%</div>
+
     <!-- Performance Stats -->
     <div id="performance-stats">
         FPS: <span id="fps">0</span> | Objects: <span id="object-count">0</span>
@@ -997,6 +1097,13 @@
         let lastFpsUpdate = 0;
         let fps = 0;
         let showStats = false;
+        
+        // Zoom variables
+        let currentZoomLevel = 1.0;
+        const MIN_ZOOM = 0.5;
+        const MAX_ZOOM = 2.0;
+        const ZOOM_STEP = 0.1;
+        let zoomIndicatorTimeout;
         
         // Enhanced Weapon System variables - Now controlled through settings
         let weaponLevel = 1;
@@ -1305,6 +1412,41 @@
                 }
             });
             
+            // Zoom controls
+            document.getElementById('zoom-in').addEventListener('click', zoomIn);
+            document.getElementById('zoom-out').addEventListener('click', zoomOut);
+            
+            // Add touch events for pinch-to-zoom
+            let initialDistance = null;
+            
+            document.addEventListener('touchstart', (e) => {
+                if (e.touches.length === 2) {
+                    initialDistance = getTouchDistance(e.touches[0], e.touches[1]);
+                }
+            });
+            
+            document.addEventListener('touchmove', (e) => {
+                if (e.touches.length === 2 && initialDistance !== null) {
+                    e.preventDefault();
+                    const currentDistance = getTouchDistance(e.touches[0], e.touches[1]);
+                    const zoomFactor = currentDistance / initialDistance;
+                    
+                    if (zoomFactor > 1.05) {
+                        // Pinch out - zoom in
+                        zoomIn();
+                        initialDistance = currentDistance;
+                    } else if (zoomFactor < 0.95) {
+                        // Pinch in - zoom out
+                        zoomOut();
+                        initialDistance = currentDistance;
+                    }
+                }
+            });
+            
+            document.addEventListener('touchend', () => {
+                initialDistance = null;
+            });
+            
             window.addEventListener('resize', onWindowResize);
             window.addEventListener('wheel', onMouseWheel);
             
@@ -1318,6 +1460,60 @@
             setInterval(spawnHealthPack, HEALTH_PACK_SPAWN_INTERVAL);
             restartGame(); 
             animate();
+        }
+        
+        // Helper function to calculate distance between two touch points
+        function getTouchDistance(touch1, touch2) {
+            const dx = touch1.clientX - touch2.clientX;
+            const dy = touch1.clientY - touch2.clientY;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+        
+        // Zoom functions
+        function zoomIn() {
+            if (currentZoomLevel < MAX_ZOOM) {
+                currentZoomLevel += ZOOM_STEP;
+                applyZoom();
+                showZoomIndicator();
+            }
+        }
+        
+        function zoomOut() {
+            if (currentZoomLevel > MIN_ZOOM) {
+                currentZoomLevel -= ZOOM_STEP;
+                applyZoom();
+                showZoomIndicator();
+            }
+        }
+        
+        function applyZoom() {
+            // Adjust camera FOV based on zoom level
+            const baseFOV = 75;
+            camera.fov = baseFOV / currentZoomLevel;
+            camera.updateProjectionMatrix();
+            
+            // Also adjust camera distance for a more dramatic zoom effect
+            const baseCameraY = 25;
+            const baseCameraZ = 30;
+            cameraOffset.y = baseCameraY * currentZoomLevel;
+            cameraOffset.z = baseCameraZ * currentZoomLevel;
+        }
+        
+        function showZoomIndicator() {
+            const zoomIndicator = document.getElementById('zoom-indicator');
+            const zoomPercent = Math.round(currentZoomLevel * 100);
+            zoomIndicator.textContent = `Zoom: ${zoomPercent}%`;
+            zoomIndicator.style.display = 'block';
+            
+            // Clear previous timeout
+            if (zoomIndicatorTimeout) {
+                clearTimeout(zoomIndicatorTimeout);
+            }
+            
+            // Hide indicator after 2 seconds
+            zoomIndicatorTimeout = setTimeout(() => {
+                zoomIndicator.style.display = 'none';
+            }, 2000);
         }
         
         // Weapon level setting function
@@ -3266,11 +3462,17 @@
         
         function onMouseWheel(event) {
             if (!gameActive) return;
-            const zoomSpeed = 1.5;
-            let newY = cameraOffset.y + (event.deltaY > 0 ? zoomSpeed : -zoomSpeed);
-            newY = Math.max(CAMERA_MIN_Y, Math.min(CAMERA_MAX_Y, newY));
-            cameraOffset.y = newY;
-            cameraOffset.z = newY * CAMERA_Y_Z_RATIO;
+            
+            if (event.deltaY > 0) {
+                // Scroll down - zoom out
+                zoomOut();
+            } else {
+                // Scroll up - zoom in
+                zoomIn();
+            }
+            
+            // Prevent default to avoid page scrolling
+            event.preventDefault();
         }
         
         function updateEnvironmentColor() {
